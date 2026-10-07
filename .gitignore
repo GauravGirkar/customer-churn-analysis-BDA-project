@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.claude/
+data/raw/
+# outputs/ is committed on purpose: the deployed dashboard reads these two small files (~7 MB)
+spark-warehouse/
+metastore_db/
+derby.log
+.venv/
