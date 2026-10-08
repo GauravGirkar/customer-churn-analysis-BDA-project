@@ -14,13 +14,13 @@ import streamlit as st
 OUT = Path(os.getenv("CHURN_OUTPUT_DIR", Path(__file__).resolve().parent.parent / "outputs"))
 
 # Palette ---------------------------------------------------------------------
-# Categorical slots 1-5 (fixed order, one per model) and a one-hue ramp for risk bands.
-MODEL_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
-BAND_COLORS = {"Low": "#a9c9f2", "Medium": "#4f93e0", "High": "#1c4f94"}
-INK, MUTED, GRID = "#0b1f3a", "#5b6472", "#e7eaf0"
-FONT = "Inter, -apple-system, Segoe UI, Roboto, sans-serif"
+MODEL_COLORS = ["#1c4f94", "#c05621", "#2f855a", "#b7791f", "#805ad5"]
+BAND_COLORS = {"Low": "#b9cce6", "Medium": "#5a86bd", "High": "#1c4f94"}
+INK, MUTED, GRID = "#14171c", "#5b6472", "#e3e6ec"
+BODY = "Inter, -apple-system, Segoe UI, Roboto, sans-serif"
+MONO = "'JetBrains Mono', ui-monospace, Menlo, Consolas, monospace"
 
-st.set_page_config(page_title="Customer Churn Intelligence", page_icon="📉", layout="wide")
+st.set_page_config(page_title="Customer Churn Intelligence", layout="wide")
 
 
 # ------------------------------------------------------------- global styling
@@ -28,44 +28,52 @@ def inject_css():
     st.markdown(
         """
         <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
-        html, body, [class*="css"], .stMarkdown, .stText { font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; }
-        .block-container { padding-top: 1.6rem; padding-bottom: 2.5rem; max-width: 1280px; }
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap');
 
-        /* Hero banner */
-        .hero { background: linear-gradient(130deg, #0b2a52 0%, #1c4f94 45%, #2a78d6 100%);
-                border-radius: 16px; padding: 24px 30px; color: #fff;
-                box-shadow: 0 10px 30px rgba(28,79,148,.25); }
-        .hero h1 { color:#fff; font-size: 1.85rem; font-weight: 800; margin: 0 0 6px; letter-spacing:-.02em; }
-        .hero p  { color:#d6e4f7; margin: 0; font-size: .97rem; max-width: 760px; line-height:1.5; }
-        .badge { display:inline-block; background: rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.28);
-                 color:#fff; padding:4px 12px; border-radius:999px; font-size:.78rem; font-weight:500;
-                 margin-right:7px; margin-top:12px; backdrop-filter: blur(4px); }
+        html, body, [class*="css"], .stMarkdown, .stText { font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; color:#14171c; }
+        .block-container { padding-top: 1.3rem; padding-bottom: 2.6rem; max-width: 1200px; }
 
-        /* Metric cards */
-        [data-testid="stMetric"] { background:#fff; border:1px solid #e7eaf0; border-radius:14px;
-                 padding:16px 18px 14px; box-shadow:0 1px 3px rgba(16,24,40,.05); }
-        [data-testid="stMetricLabel"] p { color:#5b6472; font-weight:600; font-size:.82rem; }
-        [data-testid="stMetricValue"] { color:#0b2a52; font-weight:800; font-size:1.7rem; }
+        /* Masthead (flat, editorial) */
+        .masthead { border-bottom: 3px solid #14171c; padding-bottom: 14px; }
+        .masthead .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: .72rem; letter-spacing: .24em;
+                 text-transform: uppercase; color: #1c4f94; margin-bottom: 4px; }
+        .masthead h1 { font-family: 'Fraunces', Georgia, serif; font-weight: 600; font-size: 2.5rem; line-height: 1.04;
+                 letter-spacing: -.015em; margin: 2px 0 .4rem; color: #14171c; }
+        .masthead .lede { font-size: 1.02rem; color: #434a56; max-width: 72ch; line-height: 1.5; }
+        .masthead .meta { font-family: 'JetBrains Mono', monospace; font-size: .74rem; color: #5b6472;
+                 margin-top: 12px; }
+        .masthead .meta b { color: #14171c; font-weight: 700; }
+        .masthead .meta span { color: #c3c8d2; margin: 0 10px; }
 
-        /* Tabs */
-        .stTabs [data-baseweb="tab-list"] { gap:6px; border-bottom:1px solid #e7eaf0; }
-        .stTabs [data-baseweb="tab"] { padding:9px 18px; border-radius:9px 9px 0 0; font-weight:600;
-                 color:#5b6472; font-size:.92rem; }
-        .stTabs [aria-selected="true"] { background:#eef4fc; color:#1c4f94; }
+        /* Section headings use the serif; captions stay sans */
+        h2, h3 { font-family: 'Fraunces', Georgia, serif !important; font-weight: 600 !important; color: #14171c;
+                 letter-spacing: -.01em; }
 
-        /* Section headings */
-        h3 { color:#0b2a52; font-weight:700; letter-spacing:-.01em; }
-        .stDataFrame { border-radius:10px; }
+        /* Metric cells: flat, squared, mono numerals, rule on top */
+        [data-testid="stMetric"] { background: #fff; border: 1px solid #e3e6ec; border-top: 3px solid #1c4f94;
+                 border-radius: 0; padding: 14px 16px 12px; }
+        [data-testid="stMetricLabel"] p { font-family: 'JetBrains Mono', monospace; text-transform: uppercase;
+                 letter-spacing: .1em; font-size: .66rem; color: #5b6472; font-weight: 500; }
+        [data-testid="stMetricValue"] { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 1.65rem;
+                 color: #14171c; }
 
-        /* Primary buttons */
-        .stButton button[kind="primary"] { background:#1c4f94; border:0; font-weight:600; border-radius:10px; }
-        .stButton button[kind="primary"]:hover { background:#163f77; }
+        /* Tabs: mono, uppercase, underline the active one */
+        .stTabs [data-baseweb="tab-list"] { gap: 2px; border-bottom: 1px solid #e3e6ec; }
+        .stTabs [data-baseweb="tab"] { font-family: 'JetBrains Mono', monospace; text-transform: uppercase;
+                 letter-spacing: .07em; font-size: .73rem; font-weight: 500; color: #5b6472; padding: 11px 18px;
+                 border-radius: 0; }
+        .stTabs [aria-selected="true"] { color: #14171c; border-bottom: 2px solid #1c4f94; background: transparent; }
 
-        /* Tour dialog step dots */
-        .dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px; background:#d7dee8; }
-        .dot.on { background:#1c4f94; width:22px; border-radius:999px; }
-        .tour-kicker { color:#2a78d6; font-weight:700; font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; }
+        /* Buttons: squared, restrained */
+        .stButton button { border-radius: 2px; font-weight: 600; }
+        .stButton button[kind="primary"] { background: #1c4f94; border: 0; }
+        .stButton button[kind="primary"]:hover { background: #163f77; }
+
+        /* Tour chrome */
+        .tour-eyebrow { font-family: 'JetBrains Mono', monospace; text-transform: uppercase; letter-spacing: .2em;
+                 font-size: .68rem; color: #1c4f94; font-weight: 700; }
+        .dot { height:6px; width:6px; display:inline-block; margin-right:5px; background:#dde1e8; }
+        .dot.on { background:#1c4f94; width:18px; }
         </style>
         """,
         unsafe_allow_html=True,
@@ -97,10 +105,10 @@ color_of = {m: MODEL_COLORS[i % len(MODEL_COLORS)] for i, m in enumerate(model_o
 def style(fig, height=340, **kw):
     kw.setdefault("legend", dict(orientation="h", y=-0.2))
     fig.update_layout(height=height, margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="rgba(0,0,0,0)",
-                      plot_bgcolor="rgba(0,0,0,0)", font=dict(color=MUTED, size=12, family=FONT),
-                      hoverlabel=dict(font_size=12, font_family=FONT), **kw)
-    fig.update_xaxes(gridcolor=GRID, zeroline=False, linecolor=GRID)
-    fig.update_yaxes(gridcolor=GRID, zeroline=False, linecolor=GRID)
+                      plot_bgcolor="rgba(0,0,0,0)", font=dict(color=MUTED, size=12, family=BODY),
+                      hoverlabel=dict(font_size=12, font_family=BODY), **kw)
+    fig.update_xaxes(gridcolor=GRID, zeroline=False, linecolor=GRID, tickfont=dict(family=MONO, size=11))
+    fig.update_yaxes(gridcolor=GRID, zeroline=False, linecolor=GRID, tickfont=dict(family=MONO, size=11))
     return fig
 
 
@@ -109,100 +117,149 @@ def pct(x, d=1):
 
 
 # ------------------------------------------------------------------ guided tour
-TOUR_STEPS = [
-    {"kicker": "Welcome", "title": "Customer Churn Intelligence",
-     "body": """This dashboard turns **real telecom customer data** into an early-warning system for churn.
+# The tour walks through the five SOURCE TABLES - what each stores and the features it feeds -
+# then how they join into one scored row per customer.
+def tour_steps():
+    tr = metrics["table_rows"]
+    nf = metrics["n_features"]
+    return [
+        {"eyebrow": "The pipeline", "title": "From five tables to a churn score",
+         "body": f"""This dashboard is the end of a real **Big Data Analytics pipeline**. The raw material is five
+relational tables; Spark SQL turns them into one row per customer, five models score that row, and the result is
+what you see here.
 
-It is powered by a full **Big Data Analytics pipeline**: five relational tables → **Spark SQL** feature
-engineering → **five machine-learning models** → a churn probability for every customer.
+```
+customers · usage · payments · tickets · service_calls      five raw tables
+          |   Spark SQL  -  aggregate + join per customer
+          v
+one feature row per customer   ({nf} features)
+          |   Logistic Regression · Random Forest · GBT · LightGBM · XGBoost
+          v
+churn probability + risk band for every customer
+```
 
-Use the five tabs along the top to move from the big picture down to a single customer. This quick tour
-explains what each one does — it takes about 30 seconds."""},
-    {"kicker": "Tab 1 of 5", "title": "📊 Overview — the big picture",
-     "body": """Start here. The cards at the top show **how many customers are at risk** and the **monthly revenue**
-that risk represents.
+The next five steps open up **each source table**: what it records and the signals it produces."""},
 
-Below them you can see how customers split across **Low / Medium / High** risk bands, the full
-**distribution of churn probability**, and a side-by-side of **predicted vs. actual** churn broken down by
-contract, plan, internet service, payment method or region."""},
-    {"kicker": "Tab 2 of 5", "title": "👥 Customers — act on individuals",
-     "body": """This is the operational tab. **Filter** the customer base by risk band, contract, region or plan,
-then read each customer's churn probability alongside **plain-language risk factors** ("2 late payments",
-"usage declining").
+        {"eyebrow": "Source table 1 of 5", "title": "customers — who the customer is",
+         "body": f"""The **real IBM / Kaggle Telco Customer Churn** data — **{tr['customers']:,} rows**, one per customer.
 
-**Download** the filtered list as CSV for a retention campaign, or use **Customer lookup** to pull up one
-customer and see what every model predicts for them."""},
-    {"kicker": "Tab 3 of 5", "title": "🎯 Model performance — how good are the predictions?",
-     "body": """Compare all five models on the **held-out test set** they never trained on: ROC-AUC, PR-AUC,
-precision, recall and F1.
+```
+customer_id · contract · internet_service · payment_method
+monthly_charges · tenure · senior_citizen · add-ons · churned
+```
 
-Explore the **ROC and precision–recall curves**, inspect any model's **confusion matrix**, and read the
-**cumulative-gains curve** — e.g. *"contact the riskiest 10% of customers and you reach X% of everyone who
-will actually churn."*"""},
-    {"kicker": "Tab 4 of 5", "title": "🔍 Churn drivers — the why",
-     "body": """See **which signals each model relies on most**, then check real churn rates broken down by behaviour:
-late payments, support tickets, complaints, service calls and **tenure**.
+These real fields become the **profile features**: `tenure_months`, `monthly_charges`, `total_charges`, `age`,
+and the categoricals `contract / plan / internet_service / payment_method`. The `churned` column is the **real
+outcome** every model is trained to predict."""},
 
-This is where the story behind the score lives — useful for deciding *what* to fix, not just *who* to call."""},
-    {"kicker": "Tab 5 of 5", "title": "⚙️ Pipeline — under the hood",
-     "body": """A transparent view of **how the numbers were produced**: the raw tables and their row counts, the
-train / validation / test split, which model was promoted to production, and the total pipeline run time.
+        {"eyebrow": "Source table 2 of 5", "title": "usage — how much they use the service",
+         "body": f"""A **six-month behavioural time-series** — six rows per customer, **{tr['usage']:,} rows** in all.
 
-Everything is reproducible — the README shows how to rebuild the data and re-run the pipeline. **Enjoy!**"""},
-]
+```
+customer_id · month · call_minutes · data_gb · sms_count · app_logins
+```
+
+Spark SQL averages each metric and compares the **last 3 months against the prior 3**, yielding usage **levels**
+(`avg_call_minutes`, `avg_data_gb`, …) and **trends** (`minutes_trend`, `data_trend`, `logins_trend`). A usage
+curve that is fading is one of the earliest churn signals."""},
+
+        {"eyebrow": "Source table 3 of 5", "title": "payments — how reliably they pay",
+         "body": f"""One row per monthly bill — **{tr['payments']:,} rows**.
+
+```
+customer_id · due_date · paid_date · amount · days_late
+```
+
+Aggregated into `late_payments`, `late_payment_ratio`, `avg_days_late`, `max_days_late` and
+`late_payments_recent` (the last 3 months). Repeated or worsening late payment is a strong dissatisfaction marker."""},
+
+        {"eyebrow": "Source table 4 of 5", "title": "tickets — what they complain about",
+         "body": f"""Support tickets raised by some customers — **{tr['tickets']:,} rows**.
+
+```
+customer_id · category · is_complaint · escalated · resolution_hours · satisfaction
+```
+
+These roll up to `ticket_count`, `complaint_count`, `escalated_count`, `billing_tickets`, `network_tickets`,
+`cancellation_inquiries`, `avg_resolution_hours`, `avg_satisfaction` and `tickets_last_30d`. A **cancellation
+inquiry** ticket is about as loud as a churn signal gets."""},
+
+        {"eyebrow": "Source table 5 of 5", "title": "service_calls — how those calls went",
+         "body": f"""Call-centre interactions — **{tr['service_calls']:,} rows**.
+
+```
+customer_id · call_date · duration_min · resolved · sentiment
+```
+
+These become `call_count`, `avg_call_duration`, `unresolved_calls`, `avg_sentiment` and `calls_last_30d`.
+Unresolved calls and negative sentiment push a customer's risk up sharply."""},
+
+        {"eyebrow": "Putting it together", "title": "Features, models, and the five tabs",
+         "body": f"""Spark SQL **joins all five tables into one {nf}-feature row per customer**, split deterministically
+**70 / 15 / 15** into train / validation / test. Five models train; the one with the best **validation** ROC-AUC is
+promoted to production and scores every customer.
+
+Where each thing lives in this dashboard:
+
+- **Overview** — the portfolio: risk bands, probability spread, predicted vs. actual by segment
+- **Customers** — per-customer scores, plain-language risk factors, CSV export, single-customer lookup
+- **Model performance** — ROC / PR curves, confusion matrix, cumulative-gains curve
+- **Churn drivers** — which features each model leans on, and churn rate by behaviour
+- **Pipeline** — the row counts, splits and run provenance behind every number
+
+That is the whole pipeline — open any tab to dig in."""},
+    ]
 
 
-@st.dialog("Guided tour", width="large")
+@st.dialog("How this works", width="large")
 def show_tour():
+    steps = tour_steps()
     i = st.session_state.tour_step
-    step = TOUR_STEPS[i]
-    st.markdown(f"<span class='tour-kicker'>{step['kicker']}</span>", unsafe_allow_html=True)
+    step = steps[i]
+    st.markdown(f"<span class='tour-eyebrow'>{step['eyebrow']}</span>", unsafe_allow_html=True)
     st.markdown(f"### {step['title']}")
     st.markdown(step["body"])
     st.markdown(
-        "<div style='margin:14px 0 4px'>"
-        + "".join(f"<span class='dot {'on' if j == i else ''}'></span>" for j in range(len(TOUR_STEPS)))
+        "<div style='margin:16px 0 6px'>"
+        + "".join(f"<span class='dot {'on' if j == i else ''}'></span>" for j in range(len(steps)))
+        + f"<span style='font-family:{MONO};font-size:.7rem;color:#5b6472;margin-left:8px'>{i + 1} / {len(steps)}</span>"
         + "</div>",
         unsafe_allow_html=True,
     )
-    c1, c2, c3 = st.columns([1, 1, 1])
+    c1, c2, c3 = st.columns(3)
     if c1.button("Skip", use_container_width=True):
-        st.session_state.tour_step = 0
-        st.session_state.show_tour = False
+        st.session_state.update(tour_step=0, show_tour=False)
         st.rerun()
-    if i > 0 and c2.button("← Back", use_container_width=True):
+    if i > 0 and c2.button("Back", use_container_width=True):
         st.session_state.tour_step -= 1
         st.rerun()
-    last = i == len(TOUR_STEPS) - 1
-    if c3.button("Finish ✓" if last else "Next →", type="primary", use_container_width=True):
+    last = i == len(steps) - 1
+    if c3.button("Finish" if last else "Next", type="primary", use_container_width=True):
+        st.session_state.tour_step = 0 if last else i + 1
         if last:
-            st.session_state.tour_step = 0
             st.session_state.show_tour = False
-        else:
-            st.session_state.tour_step += 1
         st.rerun()
 
 
-# auto-open once per browser session, and whenever the user clicks "Take the tour"
 if "tour_step" not in st.session_state:
     st.session_state.tour_step = 0
 if "show_tour" not in st.session_state:
-    st.session_state.show_tour = True  # first load
+    st.session_state.show_tour = True  # auto-open once per session
 
 
-# ---------------------------------------------------------------- header
-hero, action = st.columns([5, 1])
-with hero:
+# ---------------------------------------------------------------- masthead
+head, action = st.columns([5, 1])
+with head:
     st.markdown(
         f"""
-        <div class="hero">
+        <div class="masthead">
+          <div class="eyebrow">Telecom retention analytics</div>
           <h1>Customer Churn Intelligence</h1>
-          <p>Predicting which telecom customers are about to leave — from real customer data through a
-          Spark big-data pipeline to a churn probability for every account.</p>
-          <span class="badge">🗄️ {metrics['n_customers']:,} real customers</span>
-          <span class="badge">🏆 Live model: {models[best]['display_name']}</span>
-          <span class="badge">📅 Window ending {metrics['snapshot_date']}</span>
-          <span class="badge">🔄 Run {metrics['generated_at'][:10]}</span>
+          <div class="lede">Predicting which telecom customers are about to leave &mdash; from real customer records,
+          through a Spark big-data pipeline, to a churn probability for every account.</div>
+          <div class="meta"><b>{metrics['n_customers']:,}</b> real customers<span>|</span>live model
+          <b>{models[best]['display_name']}</b><span>|</span>window ending <b>{metrics['snapshot_date']}</b>
+          <span>|</span>run <b>{metrics['generated_at'][:10]}</b></div>
         </div>
         """,
         unsafe_allow_html=True,
@@ -210,9 +267,8 @@ with hero:
 with action:
     st.write("")
     st.write("")
-    if st.button("🧭 Take the tour", type="primary", use_container_width=True):
-        st.session_state.tour_step = 0
-        st.session_state.show_tour = True
+    if st.button("How this works", type="primary", use_container_width=True):
+        st.session_state.update(tour_step=0, show_tour=True)
         st.rerun()
 
 if st.session_state.show_tour:
@@ -220,7 +276,7 @@ if st.session_state.show_tour:
 
 st.write("")
 tab_over, tab_cust, tab_perf, tab_drv, tab_pipe = st.tabs(
-    ["📊  Overview", "👥  Customers", "🎯  Model performance", "🔍  Churn drivers", "⚙️  Pipeline"])
+    ["Overview", "Customers", "Model performance", "Churn drivers", "Pipeline"])
 
 # -------------------------------------------------------------- overview
 with tab_over:
@@ -240,7 +296,7 @@ with tab_over:
         band = scores.groupby("risk_band").agg(n=("customer_id", "size"), actual=("actual_churn", "mean")).reindex(
             ["Low", "Medium", "High"])
         fig = go.Figure(go.Bar(
-            x=band.index, y=band.n, marker_color=[BAND_COLORS[b] for b in band.index], marker_cornerradius=4,
+            x=band.index, y=band.n, marker_color=[BAND_COLORS[b] for b in band.index], marker_cornerradius=2,
             customdata=band.actual, hovertemplate="%{x}: %{y:,} customers<br>actual churn %{customdata:.1%}<extra></extra>"))
         st.plotly_chart(style(fig, yaxis_title="customers"), use_container_width=True)
         st.caption("Actual churn by band: " + " · ".join(f"{b} {pct(r)}" for b, r in band.actual.items()))
@@ -260,10 +316,10 @@ with tab_over:
     seg = scores.groupby(seg_col).agg(pred=("churn_probability", "mean"), actual=("actual_churn", "mean"),
                                       n=("customer_id", "size")).sort_values("actual", ascending=False)
     fig = go.Figure()
-    fig.add_bar(name="Actual churn", x=seg.index, y=seg.actual, marker_color=MODEL_COLORS[0], marker_cornerradius=4,
+    fig.add_bar(name="Actual churn", x=seg.index, y=seg.actual, marker_color=MODEL_COLORS[0], marker_cornerradius=2,
                 customdata=seg.n, hovertemplate="%{x}<br>actual %{y:.1%} (n=%{customdata:,})<extra></extra>")
     fig.add_bar(name="Mean predicted probability", x=seg.index, y=seg.pred, marker_color=MODEL_COLORS[1],
-                marker_cornerradius=4, hovertemplate="%{x}<br>predicted %{y:.1%}<extra></extra>")
+                marker_cornerradius=2, hovertemplate="%{x}<br>predicted %{y:.1%}<extra></extra>")
     st.plotly_chart(style(fig, barmode="group", bargap=0.35, yaxis_tickformat=".0%"), use_container_width=True)
 
 # ------------------------------------------------------------- customers
@@ -309,7 +365,7 @@ with tab_cust:
                                                            help="recent 3 months ÷ prior 3 months"),
         })
     d1, d2 = st.columns([1, 3])
-    d1.download_button("⬇️  Download filtered list (CSV)", view[cols].to_csv(index=False).encode(),
+    d1.download_button("Download filtered list (CSV)", view[cols].to_csv(index=False).encode(),
                        "churn_scores.csv", "text/csv")
     d2.caption("Table shows the top 1,000 by probability; the download contains all matches.")
 
@@ -330,7 +386,7 @@ with tab_cust:
             comp = pd.DataFrame({"Model": [models[m]["display_name"] for m in model_order],
                                  "Probability": [r[f"prob_{m}"] for m in model_order]})
             fig = go.Figure(go.Bar(y=comp.Model[::-1], x=comp.Probability[::-1], orientation="h",
-                                   marker_color=[color_of[m] for m in model_order][::-1], marker_cornerradius=4,
+                                   marker_color=[color_of[m] for m in model_order][::-1], marker_cornerradius=2,
                                    hovertemplate="%{y}: %{x:.1%}<extra></extra>"))
             st.plotly_chart(style(fig, height=230, xaxis_tickformat=".0%", xaxis_range=[0, 1]),
                             use_container_width=True)
@@ -427,7 +483,7 @@ with tab_drv:
     imp = pd.DataFrame(models[sel2]["importance"]).sort_values("importance")
     imp["feature"] = imp["feature"].str.replace("_ohe_", " = ", regex=False).str.replace("_", " ")
     fig = go.Figure(go.Bar(y=imp.feature, x=imp.importance, orientation="h", marker_color=color_of[sel2],
-                           marker_cornerradius=3, hovertemplate="%{y}: %{x:.1%}<extra></extra>"))
+                           marker_cornerradius=2, hovertemplate="%{y}: %{x:.1%}<extra></extra>"))
     st.plotly_chart(style(fig, height=440, xaxis_title="relative importance (normalised)", xaxis_tickformat=".0%"),
                     use_container_width=True)
     st.caption("Tree models: impurity/gain-based importance. Logistic regression: |standardised coefficient|. "
@@ -442,7 +498,7 @@ with tab_drv:
         grp = scores.assign(v=scores[feat].clip(upper=5)).groupby("v").agg(rate=("actual_churn", "mean"),
                                                                            n=("customer_id", "size"))
         fig = go.Figure(go.Bar(x=grp.index.astype(int).astype(str).str.replace("5", "5+"), y=grp.rate,
-                               marker_color=MODEL_COLORS[0], marker_cornerradius=4, customdata=grp.n,
+                               marker_color=MODEL_COLORS[0], marker_cornerradius=2, customdata=grp.n,
                                hovertemplate="%{x}: %{y:.1%} churn (n=%{customdata:,})<extra></extra>"))
         st.plotly_chart(style(fig, height=300, xaxis_title=feat.replace("_", " "), yaxis_tickformat=".0%",
                               yaxis_title="actual churn rate"), use_container_width=True)
@@ -450,7 +506,7 @@ with tab_drv:
         tb = pd.cut(scores.tenure_months, [-1, 6, 12, 24, 36, 48, 100], labels=["0–6", "7–12", "13–24", "25–36", "37–48", "49+"])
         grp = scores.groupby(tb, observed=True).agg(rate=("actual_churn", "mean"), n=("customer_id", "size"))
         st.markdown("**Tenure (months)**")
-        fig = go.Figure(go.Bar(x=grp.index.astype(str), y=grp.rate, marker_color=MODEL_COLORS[1], marker_cornerradius=4,
+        fig = go.Figure(go.Bar(x=grp.index.astype(str), y=grp.rate, marker_color=MODEL_COLORS[1], marker_cornerradius=2,
                                customdata=grp.n, hovertemplate="%{x} months: %{y:.1%} churn (n=%{customdata:,})<extra></extra>"))
         st.plotly_chart(style(fig, height=300, xaxis_title="tenure (months)", yaxis_tickformat=".0%",
                               yaxis_title="actual churn rate"), use_container_width=True)
@@ -460,17 +516,17 @@ with tab_pipe:
     st.subheader("How the numbers were produced")
     st.markdown(f"""
 ```
-Real customers ({metrics['raw_source']})  →  reconstructed into 5 relational tables
+Real customers ({metrics['raw_source']})  ->  reconstructed into 5 relational tables
    customers · usage · payments · tickets · service_calls
-        │  Spark read (HDFS / cloud storage / local)
-        ▼
-Spark SQL feature engineering  →  {metrics['n_features']} features per customer
-        │  deterministic 70 / 15 / 15 train / validation / test split
-        ▼
+        |  Spark read (HDFS / cloud storage / local)
+        v
+Spark SQL feature engineering  ->  {metrics['n_features']} features per customer
+        |  deterministic 70 / 15 / 15 train / validation / test split
+        v
 Spark MLlib: Logistic Regression · Random Forest · GBT      Single-node: LightGBM · XGBoost
-        │  evaluate on test: ROC-AUC · PR-AUC · precision · recall · F1 · lift
-        ▼
-scores.parquet + metrics.json  →  this dashboard
+        |  evaluate on test: ROC-AUC · PR-AUC · precision · recall · F1 · lift
+        v
+scores.parquet + metrics.json  ->  this dashboard
 ```
 """)
     rows = pd.DataFrame({"Table": list(metrics["table_rows"]), "Rows": list(metrics["table_rows"].values())})
