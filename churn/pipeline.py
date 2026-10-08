@@ -108,9 +108,18 @@ def main():
         scores[f"prob_{name}"] = np.round(res["proba"], 4)
     scores.to_parquet(OUTPUT_DIR / "scores.parquet", index=False)
 
+    # Record a short, non-identifying label for the raw source: keep remote URIs
+    # (hdfs://, s3a://, ...) as-is, but reduce a local filesystem path to its last
+    # two components so the committed metrics never leak an absolute local path.
+    if "://" in args.raw:
+        raw_source = args.raw
+    else:
+        parts = os.path.normpath(args.raw).replace("\\", "/").split("/")
+        raw_source = "/".join(parts[-2:]) if len(parts) >= 2 else parts[-1]
+
     metrics = {
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "snapshot_date": SNAPSHOT_DATE, "raw_source": args.raw, "tuned": args.tune,
+        "snapshot_date": SNAPSHOT_DATE, "raw_source": raw_source, "tuned": args.tune,
         "table_rows": counts, "n_customers": int(len(pdf)), "churn_rate": float(y.mean()),
         "split_sizes": pdf["split"].value_counts().to_dict(), "n_features": len(NUMERIC) + len(CATEGORICAL),
         "best_model": best, "best_threshold": best_thr, "band_cutoffs": {"high": HIGH, "medium": MEDIUM},
