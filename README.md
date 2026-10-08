@@ -3,8 +3,11 @@
 Predicts which telecom customers are likely to churn using the full BDA pipeline:
 **ingestion → Spark SQL processing → distributed modelling → evaluation → dashboard.**
 
+Customer attributes and the churn label come from the **real** [IBM / Kaggle *Telco Customer Churn* dataset](https://www.kaggle.com/datasets/blastchar/telco-customer-churn)
+(7,043 real customers). See [About the data](#about-the-data) for how the behavioural tables are built on top of it.
+
 ```
- raw tables (Parquet/CSV)          Spark SQL                    Spark MLlib / boosters            Streamlit
+ real Telco customers              Spark SQL                    Spark MLlib / boosters            Streamlit
  customers  usage  payments  ──►  per-customer feature  ──►  LogReg · RandomForest · GBT  ──►  churn probability
  tickets  service_calls  (HDFS     table (36 features,         LightGBM · XGBoost                per customer, ROC/PR,
  or local / S3 / ADLS)             6-month window)             ROC-AUC · PR-AUC · P/R/F1         drivers, lookup, export
@@ -16,13 +19,15 @@ Requirements: Python 3.10+, **JDK 17 or 21** (Spark 4 does not run on JDK 23+; t
 from `PATH` if `JAVA_HOME` points at a newer one, or set `CHURN_JAVA_HOME`).
 
 ```bash
-pip install -r requirements-pipeline.txt             # full Spark + boosters stack (dashboard-only deps live in dashboard/requirements.txt)
-python -m churn.generate_data --customers 100000     # synthetic data -> data/raw/*.parquet
-python -m churn.pipeline                             # Spark pipeline  -> outputs/scores.parquet + metrics.json
-streamlit run dashboard/app.py                       # dashboard at http://localhost:8501
+pip install -r requirements-pipeline.txt   # full Spark + boosters stack (dashboard-only deps live in dashboard/requirements.txt)
+python -m churn.generate_data              # real Telco core -> 5 relational tables in data/raw/*.parquet
+python -m churn.pipeline                   # Spark pipeline  -> outputs/scores.parquet + metrics.json
+streamlit run dashboard/app.py             # dashboard at http://localhost:8501
 ```
 
-Windows one-liner: `.\run_all.ps1` (add `-Tune` for grid-search + 3-fold CV, `-Customers 500000` for more data).
+The real dataset ships in the repo at `data/real/Telco-Customer-Churn.csv`, so `generate_data` runs offline.
+
+Windows one-liner: `.\run_all.ps1` (add `-Tune` for grid-search + 3-fold CV, `-Scale 500000` to bootstrap to cluster-scale volume).
 
 ## What maps to the brief
 
@@ -36,20 +41,24 @@ Windows one-liner: `.\run_all.ps1` (add `-Tune` for grid-search + 3-fold CV, `-C
 | ROC-AUC, Precision/Recall, F1 | [churn/evaluate.py](churn/evaluate.py) — plus PR-AUC, confusion matrix, top-decile lift |
 | Dashboard of churn probability per customer | [dashboard/app.py](dashboard/app.py) |
 
-## Results (100k customers, 22% churn, held-out test split)
+## Results (7,043 real customers, 26.5% churn, held-out test split)
 
 | Model | ROC-AUC | PR-AUC | Precision | Recall | F1 | Lift @ top 10% |
 |---|---|---|---|---|---|---|
-| Logistic Regression (MLlib) | 0.815 | 0.588 | 0.498 | 0.627 | 0.555 | 3.22× |
-| Random Forest (MLlib) | 0.807 | 0.582 | 0.466 | 0.653 | 0.544 | 3.20× |
-| Gradient Boosted Trees (MLlib) | 0.818 | 0.592 | 0.500 | 0.640 | 0.562 | 3.26× |
-| LightGBM | 0.823 | 0.605 | 0.490 | 0.663 | 0.564 | 3.31× |
-| **XGBoost** | **0.823** | **0.605** | 0.507 | 0.639 | 0.566 | 3.31× |
+| **Logistic Regression (MLlib)** | 0.865 | 0.692 | 0.616 | 0.710 | 0.660 | 2.75× |
+| Random Forest (MLlib) | 0.858 | 0.670 | 0.618 | 0.710 | 0.661 | 2.65× |
+| Gradient Boosted Trees (MLlib) | 0.852 | 0.664 | 0.625 | 0.661 | 0.642 | 2.58× |
+| LightGBM | 0.865 | 0.690 | 0.599 | 0.765 | 0.672 | 2.88× |
+| XGBoost | 0.867 | 0.692 | 0.617 | 0.736 | 0.672 | 2.85× |
 
-Precision/recall/F1 use a threshold tuned for max F1 on the validation split (not the test split). The production
-model is picked by *validation* AUC so the test numbers stay unbiased. Numbers will vary slightly with data seed and library versions.
+The five models land within ~0.015 AUC of each other — the Telco signal is largely linear, so **Logistic Regression**
+wins on *validation* AUC and becomes the production model (XGBoost edges it on the test split). Precision/recall/F1 use a
+threshold tuned for max F1 on the validation split, not the test split, so the test numbers stay unbiased. Numbers vary
+slightly with library versions.
 
 ## Dashboard tabs
+A **guided tour** opens on first visit (reopen any time via the *🧭 Take the tour* button) and walks through each tab below.
+
 - **Overview** – risk-band counts, probability histogram, predicted vs actual churn by contract / plan / region…
 - **Customers** – filterable table of churn probability + plain-language risk factors, CSV export, single-customer lookup with every model's score
 - **Model performance** – comparison table, ROC & PR curves, confusion matrix, cumulative-gains curve
@@ -57,12 +66,20 @@ model is picked by *validation* AUC so the test numbers stay unbiased. Numbers w
 - **Pipeline** – row counts, split sizes, run metadata
 
 ## About the data
-Real telco data is private, so [churn/generate_data.py](churn/generate_data.py) simulates five relational tables
-(100k customers → 600k usage rows, 600k payment rows, ~60k tickets, ~180k service calls). A hidden "dissatisfaction"
-factor drives both behaviour (fading usage, late payments, tickets, unresolved calls) and the churn label, together with
-contract, tenure, price, and a few non-linear effects (new-customer cliff, month-to-month × e-check, price-shocked premium users).
-The model never sees the hidden factor. **To use a real dataset**, produce the same five tables (column names in the generator) and
-point `CHURN_RAW_URI` at them — nothing else changes.
+The customer core is **real**: [`data/real/Telco-Customer-Churn.csv`](data/real/Telco-Customer-Churn.csv) is the public
+IBM / Kaggle *Telco Customer Churn* dataset — 7,043 real customers with their real tenure, contract, internet service,
+payment method, monthly charges, senior-citizen flag, add-on subscriptions and **actual churn outcome** (26.5% churned).
+
+No public dataset ships the behavioural *history* a churn model needs, so [churn/generate_data.py](churn/generate_data.py)
+reconstructs the five relational tables (customers, 6-month usage, payments, tickets, service_calls) for each real customer.
+A latent "dissatisfaction" — **correlated with that customer's real churn outcome** and their real contract/tenure/charges —
+drives fading usage, late payments, complaints and unresolved calls, so the reconstructed behaviour lines up with people who
+really left. The model never sees the label or the latent; it recovers the signal from the engineered behaviour, which keeps
+results realistic (AUC ~0.86) rather than trivially perfect.
+
+**To run on a fully real behavioural dataset**, produce the same five tables (column names are in the generator) and point
+`CHURN_RAW_URI` at them — nothing downstream changes. `--scale N` bootstrap-samples the real customers up to `N` rows to
+demonstrate cluster-scale volume.
 
 Leakage guard: features use only the 6-month window ending at `SNAPSHOT_DATE`; `churned` is the outcome after it.
 The dashboard scores *all* customers; scores of training-split customers are optimistic, so use the
@@ -79,7 +96,7 @@ Heavy training stays offline; re-run `run.bat rebuild`, commit the two files, pu
 
 ## Running at scale (HDFS / cluster)
 ```bash
-python -m churn.generate_data --customers 5000000 --out staging/
+python -m churn.generate_data --scale 5000000 --out staging/
 hdfs dfs -mkdir -p /churn/raw && hdfs dfs -put staging/*.parquet /churn/raw/
 
 export CHURN_RAW_URI=hdfs://namenode:9000/churn/raw
@@ -95,6 +112,7 @@ scores export) and metric computation in pandas. Replace them with `df.write.par
 ## Layout
 ```
 churn/            config · generate_data · spark_session · ingest · features · models · evaluate · pipeline
-dashboard/app.py  Streamlit app (reads outputs/)
-data/raw/         generated tables      outputs/  scores.parquet + metrics.json
+dashboard/app.py  Streamlit app (reads outputs/) — professional UI + built-in guided tour
+data/real/        real Telco Customer Churn CSV (committed)   data/raw/  reconstructed tables (git-ignored)
+outputs/          scores.parquet + metrics.json (committed; the dashboard reads these)
 ```

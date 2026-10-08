@@ -5,19 +5,19 @@ title Churn Prediction - BDA Project
 
 REM ---------------------------------------------------------------
 REM  run.bat            -> open the dashboard (builds everything first time only)
-REM  run.bat rebuild    -> regenerate data + re-run the Spark pipeline, then open dashboard
+REM  run.bat rebuild    -> rebuild tables from the real data + re-run the Spark pipeline, then open dashboard
 REM  run.bat tune       -> same as rebuild, with grid search + 3-fold CV (slower)
-REM  run.bat 500000     -> rebuild with a custom number of customers
+REM  run.bat 500000     -> rebuild, bootstrapping the real customers up to 500000 rows (scale demo)
 REM ---------------------------------------------------------------
 
 set "MODE=%~1"
-set "CUSTOMERS=100000"
+set "SCALE="
 set "TUNE="
 set "REBUILD=0"
 
 if /i "%MODE%"=="rebuild" set "REBUILD=1"
 if /i "%MODE%"=="tune" (set "REBUILD=1" & set "TUNE=--tune")
-echo %MODE%| findstr /r "^[0-9][0-9]*$" >nul && (set "CUSTOMERS=%MODE%" & set "REBUILD=1")
+echo %MODE%| findstr /r "^[0-9][0-9]*$" >nul && (set "SCALE=--scale %MODE%" & set "REBUILD=1")
 
 where python >nul 2>nul
 if errorlevel 1 (
@@ -43,8 +43,8 @@ if not exist "data\raw\customers.parquet" set "REBUILD=1"
 if not exist "outputs\scores.parquet" set "REBUILD=1"
 
 if "%REBUILD%"=="1" (
-    echo [2/4] Generating %CUSTOMERS% synthetic customers...
-    python -m churn.generate_data --customers %CUSTOMERS%
+    echo [2/4] Building tables from the real Telco dataset %SCALE% ...
+    python -m churn.generate_data %SCALE%
     if errorlevel 1 goto :fail
     echo [3/4] Running the Spark pipeline ^(takes a few minutes^)...
     python -m churn.pipeline %TUNE%

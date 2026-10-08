@@ -9,6 +9,9 @@ ROOT = Path(__file__).resolve().parent.parent
 #   set CHURN_RAW_URI=hdfs://namenode:9000/churn/raw
 RAW_URI = os.getenv("CHURN_RAW_URI", (ROOT / "data" / "raw").as_posix())
 
+# Real IBM / Kaggle "Telco Customer Churn" CSV that anchors the customer core + churn label.
+REAL_CSV = os.getenv("CHURN_REAL_CSV", (ROOT / "data" / "real" / "Telco-Customer-Churn.csv").as_posix())
+
 # Local folder consumed by the dashboard (small: one row per customer + metrics).
 OUTPUT_DIR = Path(os.getenv("CHURN_OUTPUT_DIR", ROOT / "outputs"))
 

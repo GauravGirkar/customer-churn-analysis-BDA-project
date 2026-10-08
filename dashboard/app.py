@@ -13,12 +13,66 @@ import streamlit as st
 
 OUT = Path(os.getenv("CHURN_OUTPUT_DIR", Path(__file__).resolve().parent.parent / "outputs"))
 
+# Palette ---------------------------------------------------------------------
 # Categorical slots 1-5 (fixed order, one per model) and a one-hue ramp for risk bands.
 MODEL_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4"]
 BAND_COLORS = {"Low": "#a9c9f2", "Medium": "#4f93e0", "High": "#1c4f94"}
-INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e6e5e1"
+INK, MUTED, GRID = "#0b1f3a", "#5b6472", "#e7eaf0"
+FONT = "Inter, -apple-system, Segoe UI, Roboto, sans-serif"
 
-st.set_page_config(page_title="Customer Churn Dashboard", page_icon="📉", layout="wide")
+st.set_page_config(page_title="Customer Churn Intelligence", page_icon="📉", layout="wide")
+
+
+# ------------------------------------------------------------- global styling
+def inject_css():
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap');
+        html, body, [class*="css"], .stMarkdown, .stText { font-family: 'Inter', -apple-system, 'Segoe UI', Roboto, sans-serif; }
+        .block-container { padding-top: 1.6rem; padding-bottom: 2.5rem; max-width: 1280px; }
+
+        /* Hero banner */
+        .hero { background: linear-gradient(130deg, #0b2a52 0%, #1c4f94 45%, #2a78d6 100%);
+                border-radius: 16px; padding: 24px 30px; color: #fff;
+                box-shadow: 0 10px 30px rgba(28,79,148,.25); }
+        .hero h1 { color:#fff; font-size: 1.85rem; font-weight: 800; margin: 0 0 6px; letter-spacing:-.02em; }
+        .hero p  { color:#d6e4f7; margin: 0; font-size: .97rem; max-width: 760px; line-height:1.5; }
+        .badge { display:inline-block; background: rgba(255,255,255,.14); border:1px solid rgba(255,255,255,.28);
+                 color:#fff; padding:4px 12px; border-radius:999px; font-size:.78rem; font-weight:500;
+                 margin-right:7px; margin-top:12px; backdrop-filter: blur(4px); }
+
+        /* Metric cards */
+        [data-testid="stMetric"] { background:#fff; border:1px solid #e7eaf0; border-radius:14px;
+                 padding:16px 18px 14px; box-shadow:0 1px 3px rgba(16,24,40,.05); }
+        [data-testid="stMetricLabel"] p { color:#5b6472; font-weight:600; font-size:.82rem; }
+        [data-testid="stMetricValue"] { color:#0b2a52; font-weight:800; font-size:1.7rem; }
+
+        /* Tabs */
+        .stTabs [data-baseweb="tab-list"] { gap:6px; border-bottom:1px solid #e7eaf0; }
+        .stTabs [data-baseweb="tab"] { padding:9px 18px; border-radius:9px 9px 0 0; font-weight:600;
+                 color:#5b6472; font-size:.92rem; }
+        .stTabs [aria-selected="true"] { background:#eef4fc; color:#1c4f94; }
+
+        /* Section headings */
+        h3 { color:#0b2a52; font-weight:700; letter-spacing:-.01em; }
+        .stDataFrame { border-radius:10px; }
+
+        /* Primary buttons */
+        .stButton button[kind="primary"] { background:#1c4f94; border:0; font-weight:600; border-radius:10px; }
+        .stButton button[kind="primary"]:hover { background:#163f77; }
+
+        /* Tour dialog step dots */
+        .dot { height:8px; width:8px; border-radius:50%; display:inline-block; margin-right:6px; background:#d7dee8; }
+        .dot.on { background:#1c4f94; width:22px; border-radius:999px; }
+        .tour-kicker { color:#2a78d6; font-weight:700; font-size:.78rem; letter-spacing:.08em; text-transform:uppercase; }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_css()
 
 
 # ------------------------------------------------------------------ data
@@ -43,8 +97,8 @@ color_of = {m: MODEL_COLORS[i % len(MODEL_COLORS)] for i, m in enumerate(model_o
 def style(fig, height=340, **kw):
     kw.setdefault("legend", dict(orientation="h", y=-0.2))
     fig.update_layout(height=height, margin=dict(l=10, r=10, t=30, b=10), paper_bgcolor="rgba(0,0,0,0)",
-                      plot_bgcolor="rgba(0,0,0,0)", font=dict(color=MUTED, size=12), hoverlabel=dict(font_size=12),
-                      **kw)
+                      plot_bgcolor="rgba(0,0,0,0)", font=dict(color=MUTED, size=12, family=FONT),
+                      hoverlabel=dict(font_size=12, font_family=FONT), **kw)
     fig.update_xaxes(gridcolor=GRID, zeroline=False, linecolor=GRID)
     fig.update_yaxes(gridcolor=GRID, zeroline=False, linecolor=GRID)
     return fig
@@ -54,13 +108,119 @@ def pct(x, d=1):
     return f"{x * 100:.{d}f}%"
 
 
-# ---------------------------------------------------------------- header
-st.title("Customer Churn Prediction")
-st.caption(f"Scores from **{models[best]['display_name']}** · {metrics['n_customers']:,} customers · observation window "
-           f"ending {metrics['snapshot_date']} · pipeline run {metrics['generated_at'][:16].replace('T', ' ')} UTC")
+# ------------------------------------------------------------------ guided tour
+TOUR_STEPS = [
+    {"kicker": "Welcome", "title": "Customer Churn Intelligence",
+     "body": """This dashboard turns **real telecom customer data** into an early-warning system for churn.
 
+It is powered by a full **Big Data Analytics pipeline**: five relational tables → **Spark SQL** feature
+engineering → **five machine-learning models** → a churn probability for every customer.
+
+Use the five tabs along the top to move from the big picture down to a single customer. This quick tour
+explains what each one does — it takes about 30 seconds."""},
+    {"kicker": "Tab 1 of 5", "title": "📊 Overview — the big picture",
+     "body": """Start here. The cards at the top show **how many customers are at risk** and the **monthly revenue**
+that risk represents.
+
+Below them you can see how customers split across **Low / Medium / High** risk bands, the full
+**distribution of churn probability**, and a side-by-side of **predicted vs. actual** churn broken down by
+contract, plan, internet service, payment method or region."""},
+    {"kicker": "Tab 2 of 5", "title": "👥 Customers — act on individuals",
+     "body": """This is the operational tab. **Filter** the customer base by risk band, contract, region or plan,
+then read each customer's churn probability alongside **plain-language risk factors** ("2 late payments",
+"usage declining").
+
+**Download** the filtered list as CSV for a retention campaign, or use **Customer lookup** to pull up one
+customer and see what every model predicts for them."""},
+    {"kicker": "Tab 3 of 5", "title": "🎯 Model performance — how good are the predictions?",
+     "body": """Compare all five models on the **held-out test set** they never trained on: ROC-AUC, PR-AUC,
+precision, recall and F1.
+
+Explore the **ROC and precision–recall curves**, inspect any model's **confusion matrix**, and read the
+**cumulative-gains curve** — e.g. *"contact the riskiest 10% of customers and you reach X% of everyone who
+will actually churn."*"""},
+    {"kicker": "Tab 4 of 5", "title": "🔍 Churn drivers — the why",
+     "body": """See **which signals each model relies on most**, then check real churn rates broken down by behaviour:
+late payments, support tickets, complaints, service calls and **tenure**.
+
+This is where the story behind the score lives — useful for deciding *what* to fix, not just *who* to call."""},
+    {"kicker": "Tab 5 of 5", "title": "⚙️ Pipeline — under the hood",
+     "body": """A transparent view of **how the numbers were produced**: the raw tables and their row counts, the
+train / validation / test split, which model was promoted to production, and the total pipeline run time.
+
+Everything is reproducible — the README shows how to rebuild the data and re-run the pipeline. **Enjoy!**"""},
+]
+
+
+@st.dialog("Guided tour", width="large")
+def show_tour():
+    i = st.session_state.tour_step
+    step = TOUR_STEPS[i]
+    st.markdown(f"<span class='tour-kicker'>{step['kicker']}</span>", unsafe_allow_html=True)
+    st.markdown(f"### {step['title']}")
+    st.markdown(step["body"])
+    st.markdown(
+        "<div style='margin:14px 0 4px'>"
+        + "".join(f"<span class='dot {'on' if j == i else ''}'></span>" for j in range(len(TOUR_STEPS)))
+        + "</div>",
+        unsafe_allow_html=True,
+    )
+    c1, c2, c3 = st.columns([1, 1, 1])
+    if c1.button("Skip", use_container_width=True):
+        st.session_state.tour_step = 0
+        st.session_state.show_tour = False
+        st.rerun()
+    if i > 0 and c2.button("← Back", use_container_width=True):
+        st.session_state.tour_step -= 1
+        st.rerun()
+    last = i == len(TOUR_STEPS) - 1
+    if c3.button("Finish ✓" if last else "Next →", type="primary", use_container_width=True):
+        if last:
+            st.session_state.tour_step = 0
+            st.session_state.show_tour = False
+        else:
+            st.session_state.tour_step += 1
+        st.rerun()
+
+
+# auto-open once per browser session, and whenever the user clicks "Take the tour"
+if "tour_step" not in st.session_state:
+    st.session_state.tour_step = 0
+if "show_tour" not in st.session_state:
+    st.session_state.show_tour = True  # first load
+
+
+# ---------------------------------------------------------------- header
+hero, action = st.columns([5, 1])
+with hero:
+    st.markdown(
+        f"""
+        <div class="hero">
+          <h1>Customer Churn Intelligence</h1>
+          <p>Predicting which telecom customers are about to leave — from real customer data through a
+          Spark big-data pipeline to a churn probability for every account.</p>
+          <span class="badge">🗄️ {metrics['n_customers']:,} real customers</span>
+          <span class="badge">🏆 Live model: {models[best]['display_name']}</span>
+          <span class="badge">📅 Window ending {metrics['snapshot_date']}</span>
+          <span class="badge">🔄 Run {metrics['generated_at'][:10]}</span>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+with action:
+    st.write("")
+    st.write("")
+    if st.button("🧭 Take the tour", type="primary", use_container_width=True):
+        st.session_state.tour_step = 0
+        st.session_state.show_tour = True
+        st.rerun()
+
+if st.session_state.show_tour:
+    show_tour()
+
+st.write("")
 tab_over, tab_cust, tab_perf, tab_drv, tab_pipe = st.tabs(
-    ["Overview", "Customers", "Model performance", "Churn drivers", "Pipeline"])
+    ["📊  Overview", "👥  Customers", "🎯  Model performance", "🔍  Churn drivers", "⚙️  Pipeline"])
 
 # -------------------------------------------------------------- overview
 with tab_over:
@@ -73,6 +233,7 @@ with tab_over:
                                                             f"({pct(len(high) / len(scores))} of the base)")
     c4.metric("Monthly revenue at risk", f"${at_risk_rev:,.0f}", help="Sum of monthly charges of high-risk customers")
 
+    st.write("")
     left, right = st.columns(2)
     with left:
         st.subheader("Customers by risk band")
@@ -148,10 +309,11 @@ with tab_cust:
                                                            help="recent 3 months ÷ prior 3 months"),
         })
     d1, d2 = st.columns([1, 3])
-    d1.download_button("Download filtered list (CSV)", view[cols].to_csv(index=False).encode(),
+    d1.download_button("⬇️  Download filtered list (CSV)", view[cols].to_csv(index=False).encode(),
                        "churn_scores.csv", "text/csv")
     d2.caption("Table shows the top 1,000 by probability; the download contains all matches.")
 
+    st.divider()
     st.subheader("Customer lookup")
     q = st.text_input("Customer ID", placeholder=f"e.g. {scores.customer_id.iloc[0]}")
     if q:
@@ -193,6 +355,7 @@ with tab_perf:
     st.caption("Precision / recall / F1 use each model's decision threshold tuned for max F1 on the validation split. "
                f"Production scores come from **{models[best]['display_name']}**, chosen by validation ROC-AUC.")
 
+    st.write("")
     cl, cr = st.columns(2)
     with cl:
         st.subheader("ROC curves")
@@ -218,6 +381,7 @@ with tab_perf:
         st.plotly_chart(style(fig, height=380, xaxis_title="recall", yaxis_title="precision",
                               legend=dict(orientation="h", y=-0.3)), use_container_width=True)
 
+    st.divider()
     st.subheader("Inspect one model")
     sel = st.selectbox("Model", model_order, index=model_order.index(best), format_func=lambda m: models[m]["display_name"])
     test = scores[scores.split == "test"]
@@ -269,6 +433,7 @@ with tab_drv:
     st.caption("Tree models: impurity/gain-based importance. Logistic regression: |standardised coefficient|. "
                "Importance shows what the model uses, not a causal effect.")
 
+    st.divider()
     st.subheader("Churn rate by behaviour")
     b1, b2 = st.columns(2)
     with b1:
@@ -295,7 +460,7 @@ with tab_pipe:
     st.subheader("How the numbers were produced")
     st.markdown(f"""
 ```
-Raw tables ({metrics['raw_source']})
+Real customers ({metrics['raw_source']})  →  reconstructed into 5 relational tables
    customers · usage · payments · tickets · service_calls
         │  Spark read (HDFS / cloud storage / local)
         ▼
@@ -313,9 +478,11 @@ scores.parquet + metrics.json  →  this dashboard
     p1.dataframe(rows, hide_index=True, use_container_width=True, column_config={"Rows": st.column_config.NumberColumn(format="%d")})
     with p2:
         st.markdown(f"""
-- **Customers:** {metrics['n_customers']:,} · **churn rate:** {pct(metrics['churn_rate'])}
+- **Customers:** {metrics['n_customers']:,} (real IBM/Kaggle Telco Customer Churn) · **churn rate:** {pct(metrics['churn_rate'])}
 - **Split:** {', '.join(f'{k} {v:,}' for k, v in metrics['split_sizes'].items())}
 - **Hyper-parameter search:** {'3-fold CV grid search' if metrics['tuned'] else 'fixed defaults (run with --tune for CV)'}
 - **Pipeline wall time:** {metrics['pipeline_seconds']} s
 - **Risk bands:** High ≥ {metrics['band_cutoffs']['high']:.2f}, Medium ≥ {metrics['band_cutoffs']['medium']:.2f}
 """)
+    st.caption("Customer attributes and the churn label are real; the behavioural history (usage, payments, "
+               "tickets, calls) is reconstructed per real customer to feed the Spark feature pipeline.")

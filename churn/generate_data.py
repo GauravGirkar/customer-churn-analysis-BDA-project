@@ -1,12 +1,21 @@
-"""Synthetic telecom churn data generator -> five relational tables.
+"""Hybrid real + reconstructed telecom churn data -> five relational tables.
 
-Real telco data is private, so we simulate it. A hidden per-customer "dissatisfaction" factor drives
-BOTH the observable behaviour (falling usage, late payments, tickets, unresolved calls) and the churn
-label, plus contract/tenure/price effects and noise. The model never sees the hidden factor, so it has
-to recover it from behaviour - which keeps results realistic (AUC ~0.8) instead of trivially perfect.
+Customer attributes and the churn label come from the **real** IBM / Kaggle
+*Telco Customer Churn* dataset (7,043 real customers: tenure, contract, internet
+service, payment method, monthly charges, senior-citizen flag, add-on services
+and the actual Churn outcome).
 
-    python -m churn.generate_data --customers 100000
-    python -m churn.generate_data --customers 2000000 --out hdfs-staging/   # then `hdfs dfs -put`
+No public dataset ships the behavioural *history* a churn model needs, so we
+reconstruct the five relational tables (customers, 6-month usage, payments,
+tickets, service_calls) for each real customer. The behaviour is driven by a
+latent "dissatisfaction" that is correlated with that customer's REAL churn
+outcome and their real contract / tenure / charges, so declining usage, late
+payments, complaints and unresolved calls line up with people who really left.
+The model never sees the label or the latent - it has to recover the signal
+from the engineered behaviour, exactly as in production.
+
+    python -m churn.generate_data                      # all 7,043 real customers
+    python -m churn.generate_data --scale 100000       # bootstrap to cluster-scale volume
 """
 import argparse
 from pathlib import Path
@@ -14,64 +23,75 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from churn.config import RAW_URI, SEED, SNAPSHOT_DATE
+from churn.config import REAL_CSV, RAW_URI, SEED, SNAPSHOT_DATE
 
 N_MONTHS = 6
-TARGET_CHURN_RATE = 0.22
+
+# Map the real dataset's values onto this project's table vocabulary.
+INTERNET_MAP = {"Fiber optic": "Fiber", "DSL": "DSL", "No": "None"}
+PAYMENT_MAP = {
+    "Bank transfer (automatic)": "Bank transfer (auto)",
+    "Credit card (automatic)": "Credit card (auto)",
+    "Electronic check": "Electronic check",
+    "Mailed check": "Mailed check",
+}
+ADDON_COLS = ["OnlineSecurity", "OnlineBackup", "DeviceProtection",
+              "TechSupport", "StreamingTV", "StreamingMovies"]
 
 
 def _sigmoid(x):
     return 1.0 / (1.0 + np.exp(-x))
 
 
-def _calibrate_intercept(z, target):
-    """Bisection so that mean(sigmoid(z + b)) == target churn rate."""
-    lo, hi = -15.0, 15.0
-    for _ in range(60):
-        mid = (lo + hi) / 2
-        if _sigmoid(z + mid).mean() > target:
-            hi = mid
-        else:
-            lo = mid
-    return (lo + hi) / 2
+def load_real(path=REAL_CSV):
+    """Read the real Telco CSV and coerce its columns into the project's customer schema."""
+    df = pd.read_csv(path)
+    df.columns = [c.strip() for c in df.columns]
+    df["TotalCharges"] = pd.to_numeric(df["TotalCharges"].astype(str).str.strip(), errors="coerce")
+    # 11 brand-new (tenure 0) customers have a blank TotalCharges -> fall back to one month.
+    df["TotalCharges"] = df["TotalCharges"].fillna(df["MonthlyCharges"])
+    return df
 
 
-def generate(n, seed=SEED):
+def _scale_real(df, scale, rng):
+    """Use every real customer as-is, or bootstrap-sample (with replacement) to `scale` rows
+    to simulate cluster-scale volume. Every row is still a real customer record."""
+    if scale is None or scale == len(df):
+        out = df.reset_index(drop=True).copy()
+        out["customer_id"] = out["customerID"].astype(str)
+        return out
+    idx = rng.integers(0, len(df), size=scale)
+    out = df.iloc[idx].reset_index(drop=True).copy()
+    # Unique ids for duplicated rows; tiny jitter on the continuous field so bootstrap rows differ.
+    out["customer_id"] = [f"{cid}-{i:07d}" for i, cid in enumerate(out["customerID"].astype(str))]
+    out["MonthlyCharges"] = (out["MonthlyCharges"] * rng.normal(1.0, 0.03, scale)).round(2).clip(15)
+    return out
+
+
+def generate(scale=None, seed=SEED, real_path=REAL_CSV):
     rng = np.random.default_rng(seed)
     snapshot = pd.Timestamp(SNAPSHOT_DATE)
-    ids = np.arange(1, n + 1)
-    cust_id = np.char.add("C", np.char.zfill(ids.astype(str), 8))
+    real = _scale_real(load_real(real_path), scale, rng)
+    n = len(real)
 
-    # ---------------------------------------------------------------- customers
-    tenure = np.clip(rng.gamma(2.0, 14.0, n).astype(int) + 1, 1, 72)
-    contract = rng.choice(["Month-to-month", "One year", "Two year"], n, p=[0.55, 0.25, 0.20])
-    plan = rng.choice(["Basic", "Standard", "Premium"], n, p=[0.35, 0.40, 0.25])
-    pay_method = rng.choice(
-        ["Credit card (auto)", "Bank transfer (auto)", "Electronic check", "Mailed check"],
-        n, p=[0.30, 0.25, 0.30, 0.15])
-    internet = rng.choice(["Fiber", "DSL", "None"], n, p=[0.45, 0.35, 0.20])
-    region = rng.choice(["North", "South", "East", "West", "Central"], n)
-    age = np.clip(rng.normal(44, 15, n).astype(int), 18, 85)
-    base_price = pd.Series(plan).map({"Basic": 30, "Standard": 55, "Premium": 85}).to_numpy()
-    monthly_charges = np.round(base_price + (internet == "Fiber") * 20 + (internet == "DSL") * 8
-                               + rng.normal(0, 6, n), 2).clip(15)
-    signup = snapshot - pd.to_timedelta(tenure * 30, unit="D")
+    cust_id = real["customer_id"].to_numpy()
+    churned = (real["Churn"] == "Yes").astype(int).to_numpy()
+    tenure = real["tenure"].clip(0, 72).astype(int).to_numpy()
+    contract = real["Contract"].to_numpy()
+    internet = real["InternetService"].map(INTERNET_MAP).to_numpy()
+    pay_method = real["PaymentMethod"].map(PAYMENT_MAP).to_numpy()
+    monthly_charges = real["MonthlyCharges"].astype(float).round(2).to_numpy()
 
-    d = rng.normal(0, 1, n)  # hidden dissatisfaction
-    m2m = contract == "Month-to-month"
-    two = contract == "Two year"
-    echeck = pay_method == "Electronic check"
+    # age isn't in the dataset, but the senior-citizen flag is -> draw a plausible age from it.
+    senior = real["SeniorCitizen"].astype(int).to_numpy()
+    age = np.where(senior == 1, rng.integers(65, 86, n), rng.integers(20, 65, n)).astype(int)
 
-    z = (0.9 * d + 0.85 * m2m - 0.9 * two - 0.022 * tenure
-         + 0.012 * (monthly_charges - 60) + 0.45 * echeck + 0.3 * (internet == "Fiber")
-         - 0.008 * (age - 44) + rng.normal(0, 0.5, n))
-    # non-linear effects real churn has (trees can learn these, a plain linear model cannot):
-    z += 0.9 * (tenure <= 6)                                  # "honeymoon cliff" for brand-new accounts
-    z += 0.7 * (m2m & echeck)                                 # flight-risk interaction
-    z += 0.8 * (m2m & (plan == "Premium") & (monthly_charges > 95))  # price-shocked premium users
-    z += 0.6 * np.clip(d, 0, None) ** 2 * (internet == "Fiber")      # unhappy fibre users escalate fast
-    z += _calibrate_intercept(z, TARGET_CHURN_RATE)
-    churned = (rng.random(n) < _sigmoid(z)).astype(int)
+    # plan tier from the number of real add-on subscriptions (0-1 Basic, 2-4 Standard, 5-6 Premium).
+    addon_count = sum((real[c] == "Yes").astype(int).to_numpy() for c in ADDON_COLS)
+    plan = np.where(addon_count >= 5, "Premium", np.where(addon_count >= 2, "Standard", "Basic"))
+
+    region = rng.choice(["North", "South", "East", "West", "Central"], n)  # not in source; no signal
+    signup = snapshot - pd.to_timedelta(np.maximum(tenure, 1) * 30, unit="D")
 
     customers = pd.DataFrame({
         "customer_id": cust_id, "signup_date": signup.strftime("%Y-%m-%d"), "age": age,
@@ -79,13 +99,23 @@ def generate(n, seed=SEED):
         "payment_method": pay_method, "monthly_charges": monthly_charges, "churned": churned,
     })
 
+    # ---- latent dissatisfaction: correlated with the REAL outcome (+ noise) so the reconstructed
+    #      behaviour is predictive but not an oracle. The model never sees this or the label.
+    m2m = contract == "Month-to-month"
+    echeck = pay_method == "Electronic check"
+    d = (rng.normal(0, 1, n)
+         + 1.05 * (churned - churned.mean())          # real churners drift unhappy
+         + 0.20 * m2m - 0.15 * (contract == "Two year")
+         - 0.010 * (tenure - tenure.mean()))
+    d = (d - d.mean()) / d.std()                       # standardise
+
     # -------------------------------------------------------------------- usage
     month_starts = pd.date_range(end=snapshot, periods=N_MONTHS, freq="MS")
     base_min = rng.lognormal(5.6, 0.5, n)
     base_gb = rng.lognormal(2.0, 0.7, n) * (internet != "None")
     base_sms = rng.lognormal(3.5, 0.8, n)
     base_login = rng.lognormal(2.3, 0.6, n)
-    slope = -0.11 * d + rng.normal(0, 0.04, n)  # unhappy customers fade out
+    slope = -0.11 * d + rng.normal(0, 0.04, n)         # unhappy customers fade out
     rows = []
     for m, ms in enumerate(month_starts):
         f = np.exp(slope * m + rng.normal(0, 0.12, n))
@@ -154,7 +184,10 @@ def generate(n, seed=SEED):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--customers", type=int, default=100_000)
+    ap.add_argument("--scale", type=int, default=None,
+                    help="bootstrap-sample the real customers (with replacement) to this many rows "
+                         "to simulate cluster-scale volume; default uses all real customers")
+    ap.add_argument("--real", default=REAL_CSV, help="path to the real Telco Customer Churn CSV")
     ap.add_argument("--out", default=RAW_URI if "://" not in RAW_URI else "data/raw",
                     help="local output folder (upload to HDFS afterwards with `hdfs dfs -put`)")
     ap.add_argument("--format", choices=["parquet", "csv"], default="parquet")
@@ -163,13 +196,13 @@ def main():
 
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    tables = generate(args.customers, args.seed)
+    tables = generate(args.scale, args.seed, args.real)
     for name, df in tables.items():
         path = out / f"{name}.{args.format}"
         df.to_parquet(path, index=False) if args.format == "parquet" else df.to_csv(path, index=False)
         print(f"{name:14s} {len(df):>10,d} rows  -> {path}")
     rate = tables["customers"]["churned"].mean()
-    print(f"\nChurn rate: {rate:.1%}  ({args.customers:,} customers)")
+    print(f"\nReal churn rate: {rate:.1%}  ({len(tables['customers']):,} customers)")
 
 
 if __name__ == "__main__":
